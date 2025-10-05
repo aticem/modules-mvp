@@ -1,0 +1,9 @@
+{
+  "name": "node-vite-dev",
+  "image": "mcr.microsoft.com/vscode/devcontainers/javascript-node:20-bookworm",
+  "postCreateCommand": "corepack enable && npm install",
+  "forwardPorts": [5173],
+  "customizations": {
+    "vscode": { "extensions": ["esbenp.prettier-vscode","dbaeumer.vscode-eslint"] }
+  }
+}
