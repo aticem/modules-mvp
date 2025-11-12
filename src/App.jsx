@@ -198,7 +198,11 @@ export default function App() {
         const id = f.properties?.panel_id ?? `P${i + 1}`;
         return {
           ...f,
-          properties: { ...f.properties, panel_id: id, status: "todo" },
+          properties: {
+            ...f.properties,
+            panel_id: id,
+            status: f.properties?.status ?? "todo",
+          },
         };
       });
       setBase(gj);
@@ -207,9 +211,20 @@ export default function App() {
     load();
   }, []);
 
+  // 🔁 panel_count destekli istatistik hesaplaması
   const stats = useMemo(() => {
-    const total = features.length;
-    const done = features.filter((f) => f.properties.status === "done").length;
+    const total = features.reduce(
+      (sum, f) => sum + (f.properties.panel_count || 1),
+      0
+    );
+    const done = features.reduce(
+      (sum, f) =>
+        sum +
+        (f.properties.status === "done"
+          ? (f.properties.panel_count || 1)
+          : 0),
+      0
+    );
     return { total, done, remaining: total - done };
   }, [features]);
 
@@ -263,8 +278,12 @@ export default function App() {
 
   const exportCSV = () => {
     const lines = [
-      ["panel_id", "status"],
-      ...features.map((f) => [f.properties.panel_id, f.properties.status]),
+      ["panel_id", "status", "panel_count"],
+      ...features.map((f) => [
+        f.properties.panel_id,
+        f.properties.status,
+        f.properties.panel_count || 1,
+      ]),
     ];
     const csv = lines
       .map((r) => r.map((x) => `"${String(x).replaceAll('"', '""')}"`).join(","))
@@ -291,9 +310,15 @@ export default function App() {
           borderBottom: "1px solid rgba(148,163,184,.2)",
         }}
       >
-        <div className="stat">Total: <b>{stats.total}</b></div>
-        <div className="stat">Done: <b style={{ color: "#22c55e" }}>{stats.done}</b></div>
-        <div className="stat">Remaining: <b style={{ color: "#f59e0b" }}>{stats.remaining}</b></div>
+        <div className="stat">
+          Total: <b>{stats.total}</b>
+        </div>
+        <div className="stat">
+          Done: <b style={{ color: "#22c55e" }}>{stats.done}</b>
+        </div>
+        <div className="stat">
+          Remaining: <b style={{ color: "#f59e0b" }}>{stats.remaining}</b>
+        </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           <button onClick={exportCSV}>Export CSV</button>
           <button onClick={resetAll}>Reset All</button>
@@ -319,8 +344,16 @@ export default function App() {
         {liveGeo && (
           <>
             <FitToDataOnce geojson={liveGeo} />
-            <GeoJSON key={geoKey} data={liveGeo} style={styleFn} onEachFeature={onEach} />
-            <SelectionTools layersRef={layersRef} setStatusByLayer={setStatusByLayer} />
+            <GeoJSON
+              key={geoKey}
+              data={liveGeo}
+              style={styleFn}
+              onEachFeature={onEach}
+            />
+            <SelectionTools
+              layersRef={layersRef}
+              setStatusByLayer={setStatusByLayer}
+            />
           </>
         )}
       </MapContainer>
