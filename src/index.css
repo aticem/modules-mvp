@@ -58,11 +58,10 @@ button.ui:hover{
     pointer-events: fill !important;   /* stroke OR events DISABLED */
 }
 
-/* TODO hover */
+/* Hover efekti */
 .panel-hover {
   filter: drop-shadow(0 0 6px rgba(96,165,250,0.85));
-  transform: scale(1.022);
-  transition: filter 0.15s ease-out, transform 0.15s ease-out;
+  transition: filter 0.15s ease-out;
 }
 
 /* Map bg */

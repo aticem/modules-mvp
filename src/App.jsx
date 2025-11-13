@@ -67,6 +67,8 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
     const startRef = useRef(null);
     const rectRef = useRef(null);
     const isDrawing = useRef(false);
+    const hasDragged = useRef(false);
+    const buttonRef = useRef(null);
 
     useEffect(() => {
         const container = map.getContainer();
@@ -107,22 +109,56 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
             const btn = e.originalEvent.button;
             if (btn !== 0 && btn !== 2) return;
 
-            e.originalEvent.preventDefault();
+            // Eğer tıklama bir layer üzerindeyse, hiçbir şey yapma
+            // Layer'ın kendi click event'i çalışacak (tek tıklama için)
+            const latlng = map.mouseEventToLatLng(e.originalEvent);
+            const pPt = point([latlng.lng, latlng.lat]);
+            let clickedOnLayer = false;
+            
+            for (const entry of layersRef.current) {
+                try {
+                    if (booleanPointInPolygon(pPt, entry.layer.feature, {
+                        ignoreBoundary: true,
+                    })) {
+                        clickedOnLayer = true;
+                        break;
+                    }
+                } catch {}
+            }
+
+            // Eğer layer üzerindeyse ve sol tık ise, hiçbir şey yapma (layer'ın click event'i çalışacak)
+            // Sadece boş alanda veya sürükleme yapılacaksa işlem yap
+            if (clickedOnLayer && btn === 0) {
+                // Layer üzerinde sol tık - layer'ın click event'ine bırak
+                return;
+            }
 
             const p = map.mouseEventToContainerPoint(e.originalEvent);
             startRef.current = p;
             isDrawing.current = true;
-
-            const color = btn === 0 ? "#22c55e" : "#ef4444";
-            createBox(p, p, color);
-
-            map.dragging.disable();
+            hasDragged.current = false;
+            buttonRef.current = btn;
         };
 
         const onMouseMove = (e) => {
             if (!isDrawing.current) return;
             const p2 = map.mouseEventToContainerPoint(e.originalEvent);
-            createBox(startRef.current, p2, "#22c55e");
+            const p1 = startRef.current;
+            const distance = Math.sqrt(
+                Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2)
+            );
+
+            // Eğer mouse 5px'den fazla hareket ettiyse, sürükleme yapılıyor
+            if (distance > 5) {
+                if (!hasDragged.current) {
+                    // İlk kez sürükleme başladığında preventDefault ve dragging disable
+                    hasDragged.current = true;
+                    e.originalEvent.preventDefault();
+                    map.dragging.disable();
+                }
+                const color = buttonRef.current === 0 ? "#22c55e" : "#ef4444";
+                createBox(startRef.current, p2, color);
+            }
         };
 
         const onMouseUp = (e) => {
@@ -130,48 +166,90 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
             isDrawing.current = false;
 
             const p2 = map.mouseEventToContainerPoint(e.originalEvent);
-            const status = e.originalEvent.button === 0 ? "done" : "todo";
-
             const p1 = startRef.current;
-            const left = Math.min(p1.x, p2.x);
-            const right = Math.max(p1.x, p2.x);
-            const top = Math.min(p1.y, p2.y);
-            const bottom = Math.max(p1.y, p2.y);
+            const distance = Math.sqrt(
+                Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2)
+            );
 
-            layersRef.current.forEach(({ layer }) => {
-                const b = layer.getBounds();
-                if (!b.isValid()) return;
+            // Eğer sürükleme yapıldıysa (5px'den fazla hareket), çoklu seçim yap
+            if (hasDragged.current && distance > 5) {
+                e.originalEvent.preventDefault();
+                e.originalEvent.stopPropagation();
 
-                const nw = map.latLngToContainerPoint(b.getNorthWest());
-                const se = map.latLngToContainerPoint(b.getSouthEast());
+                const left = Math.min(p1.x, p2.x);
+                const right = Math.max(p1.x, p2.x);
+                const top = Math.min(p1.y, p2.y);
+                const bottom = Math.max(p1.y, p2.y);
 
-                const minX = Math.min(nw.x, se.x);
-                const maxX = Math.max(nw.x, se.x);
-                const minY = Math.min(nw.y, se.y);
-                const maxY = Math.max(nw.y, se.y);
+                const status = buttonRef.current === 0 ? "done" : "todo";
 
-                if (maxX >= left && minX <= right && maxY >= top && minY <= bottom) {
-                    setStatusByLayer(layer, status);
+                layersRef.current.forEach(({ layer }) => {
+                    const b = layer.getBounds();
+                    if (!b.isValid()) return;
+
+                    const nw = map.latLngToContainerPoint(b.getNorthWest());
+                    const se = map.latLngToContainerPoint(b.getSouthEast());
+
+                    const minX = Math.min(nw.x, se.x);
+                    const maxX = Math.max(nw.x, se.x);
+                    const minY = Math.min(nw.y, se.y);
+                    const maxY = Math.max(nw.y, se.y);
+
+                    if (maxX >= left && minX <= right && maxY >= top && minY <= bottom) {
+                        setStatusByLayer(layer, status);
+                    }
+                });
+            } else {
+                // Eğer sadece tıklama yapıldıysa (sürükleme yok)
+                // Layer üzerindeyse, layer'ın click event'ine bırak
+                const latlng = map.containerPointToLatLng(p2);
+                const pPt = point([latlng.lng, latlng.lat]);
+                
+                for (const entry of layersRef.current) {
+                    try {
+                        if (booleanPointInPolygon(pPt, entry.layer.feature, {
+                            ignoreBoundary: true,
+                        })) {
+                            // Layer üzerinde, layer'ın click event'i çalışacak
+                            // Hiçbir şey yapma
+                            removeBox();
+                            map.dragging.enable();
+                            hasDragged.current = false;
+                            return;
+                        }
+                    } catch {}
                 }
-            });
+            }
 
             removeBox();
             map.dragging.enable();
+            hasDragged.current = false;
         };
 
         const onClick = (e) => {
-            const btn = e.originalEvent.button;
-            if (btn !== 0 && btn !== 2) return;
+            // Eğer sürükleme yapıldıysa, onClick'i yok say
+            if (hasDragged.current) {
+                hasDragged.current = false;
+                return;
+            }
 
+            const btn = e.originalEvent.button;
+            // Sol tık layer'ın kendi click event'i tarafından handle edilecek
+            if (btn !== 2) return;
+
+            // Sadece sağ tık için burada işlem yap
             const latlng = e.latlng;
             const clickP = point([latlng.lng, latlng.lat]);
-            const status = btn === 0 ? "done" : "todo";
 
             for (const entry of layersRef.current) {
-                if (booleanPointInPolygon(clickP, entry.layer.feature)) {
-                    setStatusByLayer(entry.layer, status);
-                    break;
-                }
+                try {
+                    if (booleanPointInPolygon(clickP, entry.layer.feature, {
+                        ignoreBoundary: true,
+                    })) {
+                        setStatusByLayer(entry.layer, "todo");
+                        break;
+                    }
+                } catch {}
             }
         };
 
@@ -318,16 +396,27 @@ export default function App() {
     const onEach = (feature, layer) => {
         layer.on("mouseover", function () {
             if (feature.properties.status === "done") return;
-
             this.setStyle(hoverStyle);
             if (this._path) this._path.classList.add("panel-hover");
         });
 
         layer.on("mouseout", function () {
             if (feature.properties.status === "done") return;
-
             this.setStyle(styleFn(feature));
             if (this._path) this._path.classList.remove("panel-hover");
+        });
+
+        // Sol tık → masa DONE
+        layer.on("click", function (e) {
+            if (e.originalEvent.button !== 0) return;
+            if (feature.properties.status === "done") return;
+
+            e.originalEvent.preventDefault();
+            e.originalEvent.stopPropagation();
+            e.originalEvent.stopImmediatePropagation();
+
+            // Direkt olarak DONE yap
+            setStatusByLayer(layer, "done");
         });
 
         layersRef.current.push({ id: feature.properties.panel_id, layer });
