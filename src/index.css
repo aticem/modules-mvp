@@ -67,4 +67,14 @@ button.ui:hover{
 /* Map bg */
 .leaflet-container{
   background:#0b1020;
+  cursor: default !important; /* Normal durumda klasik üçgen mouse imleci */
+}
+
+/* Orta tuş basıldığında el işareti */
+.leaflet-container.middle-button-active {
+  cursor: grab !important;
+}
+
+.leaflet-container.middle-button-active:active {
+  cursor: grabbing !important;
 }

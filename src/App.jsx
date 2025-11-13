@@ -138,6 +138,13 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
 
         const onMouseDown = (e) => {
             const btn = e.originalEvent.button;
+            
+            // Orta tuş (middle button, button === 1) basıldığında el işareti göster
+            if (btn === 1) {
+                container.classList.add("middle-button-active");
+                return;
+            }
+            
             if (btn !== 0 && btn !== 2) return;
 
             // Eğer tıklama bir layer üzerindeyse, hiçbir şey yapma
@@ -268,13 +275,24 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
             // Burada hiçbir şey yapmaya gerek yok
         };
 
+        const onMouseUpGlobal = (e) => {
+            // Orta tuş bırakıldığında el işaretini kaldır
+            if (e.button === 1) {
+                container.classList.remove("middle-button-active");
+            }
+        };
+
         map.on("mousedown", onMouseDown);
         map.on("mousemove", onMouseMove);
         map.on("mouseup", onMouseUp);
         map.on("click", onClick);
+        
+        // Global mouseup event'i orta tuş için (harita dışına çıkılsa bile)
+        document.addEventListener("mouseup", onMouseUpGlobal);
 
         return () => {
             container.removeEventListener("contextmenu", blockContextMenu);
+            document.removeEventListener("mouseup", onMouseUpGlobal);
             map.off("mousedown", onMouseDown);
             map.off("mousemove", onMouseMove);
             map.off("mouseup", onMouseUp);
