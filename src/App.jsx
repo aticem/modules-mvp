@@ -11,30 +11,54 @@ import "./index.css";
 function AddSVGPatterns() {
     const map = useMap();
     useEffect(() => {
-        const svg = map.getPanes().overlayPane.querySelector("svg");
-        if (!svg) return;
+        // SVG'nin oluşmasını bekle
+        const createPattern = () => {
+            const svg = map.getPanes().overlayPane.querySelector("svg");
+            if (!svg) {
+                requestAnimationFrame(createPattern);
+                return;
+            }
 
-        let defs = svg.querySelector("defs");
-        if (!defs) {
-            defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-            svg.prepend(defs);
-        }
+            let defs = svg.querySelector("defs");
+            if (!defs) {
+                defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+                svg.prepend(defs);
+            }
 
-        const hatch = document.createElementNS("http://www.w3.org/2000/svg", "pattern");
-        hatch.setAttribute("id", "hatchGreen");
-        hatch.setAttribute("patternUnits", "userSpaceOnUse");
-        hatch.setAttribute("width", "8");
-        hatch.setAttribute("height", "8");
+            // Eğer pattern zaten varsa, önce kaldır
+            const existing = defs.querySelector("#hatchGreen");
+            if (existing) existing.remove();
 
-        const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        line.setAttribute("d", "M0 8 L8 0");
-        line.setAttribute("stroke", "#16a34a");
-        line.setAttribute("stroke-width", "1.4");
-        line.setAttribute("opacity", "0.45");
+            const hatch = document.createElementNS("http://www.w3.org/2000/svg", "pattern");
+            hatch.setAttribute("id", "hatchGreen");
+            hatch.setAttribute("patternUnits", "userSpaceOnUse");
+            hatch.setAttribute("width", "10");
+            hatch.setAttribute("height", "10");
+            hatch.setAttribute("patternTransform", "rotate(45)");
 
-        hatch.appendChild(line);
-        defs.appendChild(hatch);
-    }, []);
+            const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+            line.setAttribute("x1", "0");
+            line.setAttribute("y1", "0");
+            line.setAttribute("x2", "10");
+            line.setAttribute("y2", "10");
+            line.setAttribute("stroke", "#16a34a");
+            line.setAttribute("stroke-width", "2");
+            line.setAttribute("opacity", "0.6");
+
+            hatch.appendChild(line);
+            defs.appendChild(hatch);
+            
+            // Pattern'in oluşturulduğunu işaretle
+            window._hatchPatternReady = true;
+        };
+        
+        // Map hazır olduğunda pattern'i oluştur
+        map.whenReady(() => {
+            requestAnimationFrame(() => {
+                requestAnimationFrame(createPattern);
+            });
+        });
+    }, [map]);
     return null;
 }
 
@@ -72,6 +96,13 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
 
     useEffect(() => {
         const container = map.getContainer();
+        
+        // Context menu'yu engelle (harita seviyesinde)
+        const blockContextMenu = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+        };
+        container.addEventListener("contextmenu", blockContextMenu);
 
         const createBox = (p1, p2, color) => {
             if (!rectRef.current) {
@@ -126,10 +157,10 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
                 } catch {}
             }
 
-            // Eğer layer üzerindeyse ve sol tık ise, hiçbir şey yapma (layer'ın click event'i çalışacak)
+            // Eğer layer üzerindeyse, hiçbir şey yapma (layer'ın click/mousedown event'leri çalışacak)
             // Sadece boş alanda veya sürükleme yapılacaksa işlem yap
-            if (clickedOnLayer && btn === 0) {
-                // Layer üzerinde sol tık - layer'ın click event'ine bırak
+            if (clickedOnLayer) {
+                // Layer üzerinde - layer'ın event'lerine bırak (sol tık → DONE, sağ tık → TODO)
                 return;
             }
 
@@ -201,7 +232,7 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
                 });
             } else {
                 // Eğer sadece tıklama yapıldıysa (sürükleme yok)
-                // Layer üzerindeyse, layer'ın click event'ine bırak
+                // Layer üzerindeyse, layer'ın click/mousedown event'lerine bırak
                 const latlng = map.containerPointToLatLng(p2);
                 const pPt = point([latlng.lng, latlng.lat]);
                 
@@ -210,7 +241,7 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
                         if (booleanPointInPolygon(pPt, entry.layer.feature, {
                             ignoreBoundary: true,
                         })) {
-                            // Layer üzerinde, layer'ın click event'i çalışacak
+                            // Layer üzerinde, layer'ın event'leri çalışacak
                             // Hiçbir şey yapma
                             removeBox();
                             map.dragging.enable();
@@ -233,24 +264,8 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
                 return;
             }
 
-            const btn = e.originalEvent.button;
-            // Sol tık layer'ın kendi click event'i tarafından handle edilecek
-            if (btn !== 2) return;
-
-            // Sadece sağ tık için burada işlem yap
-            const latlng = e.latlng;
-            const clickP = point([latlng.lng, latlng.lat]);
-
-            for (const entry of layersRef.current) {
-                try {
-                    if (booleanPointInPolygon(clickP, entry.layer.feature, {
-                        ignoreBoundary: true,
-                    })) {
-                        setStatusByLayer(entry.layer, "todo");
-                        break;
-                    }
-                } catch {}
-            }
+            // Layer'ların kendi click/mousedown event'leri çalışacak
+            // Burada hiçbir şey yapmaya gerek yok
         };
 
         map.on("mousedown", onMouseDown);
@@ -259,6 +274,7 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
         map.on("click", onClick);
 
         return () => {
+            container.removeEventListener("contextmenu", blockContextMenu);
             map.off("mousedown", onMouseDown);
             map.off("mousemove", onMouseMove);
             map.off("mouseup", onMouseUp);
@@ -349,8 +365,8 @@ export default function App() {
             return {
                 ...base,
                 color: "#16a34a",
-                fillOpacity: 0.55,
-                fillPattern: "url(#hatchGreen)"
+                fillColor: "transparent", // Transparent yap ki hatch pattern görünsün
+                fillOpacity: 0
             };
         }
 
@@ -377,6 +393,73 @@ export default function App() {
 
         layer.setStyle(styleFn(layer.feature));
 
+        // Hatch pattern'i SVG path elementine uygula (setStyle sonrası)
+        if (status === "done") {
+            // Path elementinin güncellenmesini bekle ve pattern'i uygula
+            const applyHatch = () => {
+                if (layer._path) {
+                    // Pattern'in hazır olduğundan emin ol
+                    const svg = layer._path.ownerSVGElement;
+                    if (svg) {
+                        const defs = svg.querySelector("defs");
+                        const pattern = defs?.querySelector("#hatchGreen");
+                        if (!pattern) {
+                            // Pattern henüz hazır değil, tekrar dene
+                            requestAnimationFrame(applyHatch);
+                            return;
+                        }
+                    }
+                    
+                    // SVG path elementine direkt hatch pattern uygula
+                    layer._path.setAttribute("fill", "url(#hatchGreen)");
+                    layer._path.setAttribute("fill-opacity", "0.8");
+                    // CSS style'ı important ile set et ki Leaflet override edemesin
+                    layer._path.style.setProperty("fill", "url(#hatchGreen)", "important");
+                    layer._path.style.setProperty("fill-opacity", "0.8", "important");
+                    
+                    // MutationObserver ile sürekli izle ve pattern'i koru
+                    if (!layer._hatchObserver) {
+                        layer._hatchObserver = new MutationObserver(() => {
+                            if (layer._path && layer.feature.properties.status === "done") {
+                                const currentFill = layer._path.getAttribute("fill") || layer._path.style.fill;
+                                if (currentFill !== "url(#hatchGreen)") {
+                                    layer._path.setAttribute("fill", "url(#hatchGreen)");
+                                    layer._path.setAttribute("fill-opacity", "0.8");
+                                    layer._path.style.setProperty("fill", "url(#hatchGreen)", "important");
+                                    layer._path.style.setProperty("fill-opacity", "0.8", "important");
+                                }
+                            }
+                        });
+                        layer._hatchObserver.observe(layer._path, {
+                            attributes: true,
+                            attributeFilter: ["fill", "style"],
+                            subtree: false
+                        });
+                    }
+                } else {
+                    requestAnimationFrame(applyHatch);
+                }
+            };
+            // Birkaç frame bekle ki setStyle tamamlanmış olsun
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(applyHatch);
+                });
+            });
+        } else {
+            // Pattern'i kaldır ve observer'ı temizle
+            if (layer._hatchObserver) {
+                layer._hatchObserver.disconnect();
+                layer._hatchObserver = null;
+            }
+            if (layer._path) {
+                layer._path.removeAttribute("fill");
+                layer._path.removeAttribute("fill-opacity");
+                layer._path.style.removeProperty("fill");
+                layer._path.style.removeProperty("fill-opacity");
+            }
+        }
+
         if (status === "done" && layer.bringToBack) {
             layer.bringToBack();
         }
@@ -394,6 +477,79 @@ export default function App() {
        HOVER — ONLY WHEN MOUSE IS INSIDE POLYGON FILL
 -------------------------------------------------------------- */
     const onEach = (feature, layer) => {
+        // Hatch pattern uygulama fonksiyonu
+        const applyHatchPattern = () => {
+            if (layer._path && feature.properties.status === "done") {
+                // Pattern'in hazır olduğundan emin ol
+                const svg = layer._path.ownerSVGElement;
+                if (svg) {
+                    const defs = svg.querySelector("defs");
+                    const pattern = defs?.querySelector("#hatchGreen");
+                    if (!pattern) {
+                        // Pattern henüz hazır değil, tekrar dene
+                        requestAnimationFrame(applyHatchPattern);
+                        return;
+                    }
+                }
+                
+                // SVG path elementine direkt hatch pattern uygula
+                layer._path.setAttribute("fill", "url(#hatchGreen)");
+                layer._path.setAttribute("fill-opacity", "0.8");
+                // CSS style'ı important ile set et ki Leaflet override edemesin
+                layer._path.style.setProperty("fill", "url(#hatchGreen)", "important");
+                layer._path.style.setProperty("fill-opacity", "0.8", "important");
+            }
+        };
+
+        // Layer eklendiğinde hatch pattern uygula
+        layer.on("add", () => {
+            if (feature.properties.status === "done") {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(applyHatchPattern);
+                });
+            }
+        });
+
+        // Path elementini izle ve pattern'i sürekli uygula (Leaflet override ederse)
+        if (feature.properties.status === "done") {
+            const observer = new MutationObserver(() => {
+                if (layer._path && feature.properties.status === "done") {
+                    const currentFill = layer._path.getAttribute("fill") || layer._path.style.fill;
+                    if (currentFill !== "url(#hatchGreen)") {
+                        applyHatchPattern();
+                    }
+                }
+            });
+
+            // Path elementi oluştuğunda observer'ı başlat
+            const startObserver = () => {
+                if (layer._path) {
+                    observer.observe(layer._path, {
+                        attributes: true,
+                        attributeFilter: ["fill", "style"],
+                        subtree: false
+                    });
+                } else {
+                    requestAnimationFrame(startObserver);
+                }
+            };
+            requestAnimationFrame(() => {
+                requestAnimationFrame(startObserver);
+            });
+
+            // Cleanup
+            layer.on("remove", () => {
+                observer.disconnect();
+            });
+        }
+
+        // Eğer layer zaten ekliyse ve done ise, direkt uygula
+        if (feature.properties.status === "done") {
+            requestAnimationFrame(() => {
+                requestAnimationFrame(applyHatchPattern);
+            });
+        }
+
         layer.on("mouseover", function () {
             if (feature.properties.status === "done") return;
             this.setStyle(hoverStyle);
@@ -401,9 +557,34 @@ export default function App() {
         });
 
         layer.on("mouseout", function () {
-            if (feature.properties.status === "done") return;
+            if (feature.properties.status === "done") {
+                // Done olan masalarda hatch pattern'i geri yükle
+                this.setStyle(styleFn(feature));
+                if (this._path) {
+                    // Pattern'in hazır olduğundan emin ol
+                    const svg = this._path.ownerSVGElement;
+                    if (svg) {
+                        const defs = svg.querySelector("defs");
+                        const pattern = defs?.querySelector("#hatchGreen");
+                        if (pattern) {
+                            // Hatch pattern'i geri yükle
+                            this._path.setAttribute("fill", "url(#hatchGreen)");
+                            this._path.setAttribute("fill-opacity", "0.8");
+                            this._path.style.setProperty("fill", "url(#hatchGreen)", "important");
+                            this._path.style.setProperty("fill-opacity", "0.8", "important");
+                        }
+                    }
+                }
+                return;
+            }
             this.setStyle(styleFn(feature));
             if (this._path) this._path.classList.remove("panel-hover");
+        });
+
+        // Context menu'yu engelle (sağ tık menüsü)
+        layer.on("contextmenu", function (e) {
+            e.originalEvent.preventDefault();
+            e.originalEvent.stopPropagation();
         });
 
         // Sol tık → masa DONE
@@ -417,6 +598,18 @@ export default function App() {
 
             // Direkt olarak DONE yap
             setStatusByLayer(layer, "done");
+        });
+
+        // Sağ tık → masa TODO (unselect)
+        layer.on("mousedown", function (e) {
+            if (e.originalEvent.button !== 2) return;
+            
+            e.originalEvent.preventDefault();
+            e.originalEvent.stopPropagation();
+            e.originalEvent.stopImmediatePropagation();
+
+            // Direkt olarak TODO yap
+            setStatusByLayer(layer, "todo");
         });
 
         layersRef.current.push({ id: feature.properties.panel_id, layer });
