@@ -345,10 +345,12 @@ export default function App() {
                 properties: {
                     ...f.properties,
                     panel_id: f.properties.panel_id || `P${i + 1}`,
+                    total_panels: f.properties.total_panels || 1, // total_panels yoksa 1 kullan
                     status: f.properties.status || "todo"
                 }
             }));
 
+            console.log(`GeoJSON yüklendi: ${merged.length} feature`);
             setBase(gj);
             setFeatures(merged);
         };
@@ -358,9 +360,9 @@ export default function App() {
 
     /* stats */
     const stats = useMemo(() => {
-        const total = features.reduce((s, f) => s + (f.properties.panel_count || 1), 0);
+        const total = features.reduce((s, f) => s + (f.properties.total_panels || 1), 0);
         const done = features.reduce(
-            (s, f) => s + (f.properties.status === "done" ? f.properties.panel_count : 0),
+            (s, f) => s + (f.properties.status === "done" ? (f.properties.total_panels || 1) : 0),
             0
         );
         return { total, done, remaining: total - done };
@@ -636,11 +638,11 @@ export default function App() {
     /* EXPORT */
     const exportCSV = () => {
         const rows = [
-            ["panel_id", "status", "panel_count"],
+            ["panel_id", "status", "total_panels"],
             ...features.map(f => [
                 f.properties.panel_id,
                 f.properties.status,
-                f.properties.panel_count || 1
+                f.properties.total_panels || 1
             ])
         ];
         const csv = rows.map(r => r.join(",")).join("\n");
