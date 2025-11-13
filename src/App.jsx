@@ -11,7 +11,7 @@ import "./index.css";
 function AddSVGPatterns() {
     const map = useMap();
     useEffect(() => {
-        // SVG'nin oluşmasını bekle
+        // Wait for SVG to be created
         const createPattern = () => {
             const svg = map.getPanes().overlayPane.querySelector("svg");
             if (!svg) {
@@ -25,7 +25,7 @@ function AddSVGPatterns() {
                 svg.prepend(defs);
             }
 
-            // Eğer pattern zaten varsa, önce kaldır
+            // Remove existing pattern if it exists
             const existing = defs.querySelector("#hatchGreen");
             if (existing) existing.remove();
 
@@ -48,11 +48,11 @@ function AddSVGPatterns() {
             hatch.appendChild(line);
             defs.appendChild(hatch);
             
-            // Pattern'in oluşturulduğunu işaretle
+            // Mark pattern as ready
             window._hatchPatternReady = true;
         };
         
-        // Map hazır olduğunda pattern'i oluştur
+        // Create pattern when map is ready
         map.whenReady(() => {
             requestAnimationFrame(() => {
                 requestAnimationFrame(createPattern);
@@ -97,7 +97,7 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
     useEffect(() => {
         const container = map.getContainer();
         
-        // Context menu'yu engelle (harita seviyesinde)
+        // Prevent context menu (at map level)
         const blockContextMenu = (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -139,7 +139,7 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
         const onMouseDown = (e) => {
             const btn = e.originalEvent.button;
             
-            // Orta tuş (middle button, button === 1) basıldığında el işareti göster
+            // Show grab cursor when middle button (button === 1) is pressed
             if (btn === 1) {
                 container.classList.add("middle-button-active");
                 return;
@@ -147,8 +147,8 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
             
             if (btn !== 0 && btn !== 2) return;
 
-            // Eğer tıklama bir layer üzerindeyse, hiçbir şey yapma
-            // Layer'ın kendi click event'i çalışacak (tek tıklama için)
+            // If click is on a layer, do nothing
+            // Layer's own click event will handle single click
             const latlng = map.mouseEventToLatLng(e.originalEvent);
             const pPt = point([latlng.lng, latlng.lat]);
             let clickedOnLayer = false;
@@ -164,10 +164,10 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
                 } catch {}
             }
 
-            // Eğer layer üzerindeyse, hiçbir şey yapma (layer'ın click/mousedown event'leri çalışacak)
-            // Sadece boş alanda veya sürükleme yapılacaksa işlem yap
+            // If on a layer, do nothing (layer's click/mousedown events will handle it)
+            // Only process if on empty area or when dragging
             if (clickedOnLayer) {
-                // Layer üzerinde - layer'ın event'lerine bırak (sol tık → DONE, sağ tık → TODO)
+                // On layer - let layer's events handle it (left click → DONE, right click → TODO)
                 return;
             }
 
@@ -186,10 +186,10 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
                 Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2)
             );
 
-            // Eğer mouse 5px'den fazla hareket ettiyse, sürükleme yapılıyor
+            // If mouse moved more than 5px, dragging is happening
             if (distance > 5) {
                 if (!hasDragged.current) {
-                    // İlk kez sürükleme başladığında preventDefault ve dragging disable
+                    // On first drag, preventDefault and disable dragging
                     hasDragged.current = true;
                     e.originalEvent.preventDefault();
                     map.dragging.disable();
@@ -209,7 +209,7 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
                 Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2)
             );
 
-            // Eğer sürükleme yapıldıysa (5px'den fazla hareket), çoklu seçim yap
+            // If dragging occurred (more than 5px movement), perform multi-selection
             if (hasDragged.current && distance > 5) {
                 e.originalEvent.preventDefault();
                 e.originalEvent.stopPropagation();
@@ -238,8 +238,8 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
                     }
                 });
             } else {
-                // Eğer sadece tıklama yapıldıysa (sürükleme yok)
-                // Layer üzerindeyse, layer'ın click/mousedown event'lerine bırak
+                // If only click occurred (no dragging)
+                // If on a layer, let layer's click/mousedown events handle it
                 const latlng = map.containerPointToLatLng(p2);
                 const pPt = point([latlng.lng, latlng.lat]);
                 
@@ -248,8 +248,8 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
                         if (booleanPointInPolygon(pPt, entry.layer.feature, {
                             ignoreBoundary: true,
                         })) {
-                            // Layer üzerinde, layer'ın event'leri çalışacak
-                            // Hiçbir şey yapma
+                            // On layer, layer's events will handle it
+                            // Do nothing
                             removeBox();
                             map.dragging.enable();
                             hasDragged.current = false;
@@ -265,18 +265,18 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
         };
 
         const onClick = (e) => {
-            // Eğer sürükleme yapıldıysa, onClick'i yok say
+            // If dragging occurred, ignore onClick
             if (hasDragged.current) {
                 hasDragged.current = false;
                 return;
             }
 
-            // Layer'ların kendi click/mousedown event'leri çalışacak
-            // Burada hiçbir şey yapmaya gerek yok
+            // Layers' own click/mousedown events will handle it
+            // No need to do anything here
         };
 
         const onMouseUpGlobal = (e) => {
-            // Orta tuş bırakıldığında el işaretini kaldır
+            // Remove grab cursor when middle button is released
             if (e.button === 1) {
                 container.classList.remove("middle-button-active");
             }
@@ -287,7 +287,7 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
         map.on("mouseup", onMouseUp);
         map.on("click", onClick);
         
-        // Global mouseup event'i orta tuş için (harita dışına çıkılsa bile)
+        // Global mouseup event for middle button (even if mouse leaves map)
         document.addEventListener("mouseup", onMouseUpGlobal);
 
         return () => {
@@ -335,7 +335,7 @@ export default function App() {
             }
 
             if (!text) {
-                console.error("panels.geojson bulunamadı");
+                console.error("panels.geojson not found");
                 return;
             }
 
@@ -345,12 +345,12 @@ export default function App() {
                 properties: {
                     ...f.properties,
                     panel_id: f.properties.panel_id || `P${i + 1}`,
-                    total_panels: f.properties.total_panels || 1, // total_panels yoksa 1 kullan
+                    total_panels: f.properties.total_panels || 1, // Use 1 if total_panels is missing
                     status: f.properties.status || "todo"
                 }
             }));
 
-            console.log(`GeoJSON yüklendi: ${merged.length} feature`);
+            console.log(`GeoJSON loaded: ${merged.length} features`);
             setBase(gj);
             setFeatures(merged);
         };
@@ -385,7 +385,7 @@ export default function App() {
             return {
                 ...base,
                 color: "#16a34a",
-                fillColor: "transparent", // Transparent yap ki hatch pattern görünsün
+                fillColor: "transparent", // Make transparent so hatch pattern is visible
                 fillOpacity: 0
             };
         }
@@ -413,31 +413,31 @@ export default function App() {
 
         layer.setStyle(styleFn(layer.feature));
 
-        // Hatch pattern'i SVG path elementine uygula (setStyle sonrası)
+        // Apply hatch pattern to SVG path element (after setStyle)
         if (status === "done") {
-            // Path elementinin güncellenmesini bekle ve pattern'i uygula
+            // Wait for path element to update and apply pattern
             const applyHatch = () => {
                 if (layer._path) {
-                    // Pattern'in hazır olduğundan emin ol
+                    // Ensure pattern is ready
                     const svg = layer._path.ownerSVGElement;
                     if (svg) {
                         const defs = svg.querySelector("defs");
                         const pattern = defs?.querySelector("#hatchGreen");
                         if (!pattern) {
-                            // Pattern henüz hazır değil, tekrar dene
+                            // Pattern not ready yet, try again
                             requestAnimationFrame(applyHatch);
                             return;
                         }
                     }
                     
-                    // SVG path elementine direkt hatch pattern uygula
+                    // Apply hatch pattern directly to SVG path element
                     layer._path.setAttribute("fill", "url(#hatchGreen)");
                     layer._path.setAttribute("fill-opacity", "0.8");
-                    // CSS style'ı important ile set et ki Leaflet override edemesin
+                    // Set CSS style with important so Leaflet can't override it
                     layer._path.style.setProperty("fill", "url(#hatchGreen)", "important");
                     layer._path.style.setProperty("fill-opacity", "0.8", "important");
                     
-                    // MutationObserver ile sürekli izle ve pattern'i koru
+                    // Continuously monitor with MutationObserver and preserve pattern
                     if (!layer._hatchObserver) {
                         layer._hatchObserver = new MutationObserver(() => {
                             if (layer._path && layer.feature.properties.status === "done") {
@@ -460,14 +460,14 @@ export default function App() {
                     requestAnimationFrame(applyHatch);
                 }
             };
-            // Birkaç frame bekle ki setStyle tamamlanmış olsun
+            // Wait a few frames for setStyle to complete
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
                     requestAnimationFrame(applyHatch);
                 });
             });
         } else {
-            // Pattern'i kaldır ve observer'ı temizle
+            // Remove pattern and clean up observer
             if (layer._hatchObserver) {
                 layer._hatchObserver.disconnect();
                 layer._hatchObserver = null;
@@ -497,31 +497,31 @@ export default function App() {
        HOVER — ONLY WHEN MOUSE IS INSIDE POLYGON FILL
 -------------------------------------------------------------- */
     const onEach = (feature, layer) => {
-        // Hatch pattern uygulama fonksiyonu
+        // Function to apply hatch pattern
         const applyHatchPattern = () => {
             if (layer._path && feature.properties.status === "done") {
-                // Pattern'in hazır olduğundan emin ol
+                // Ensure pattern is ready
                 const svg = layer._path.ownerSVGElement;
                 if (svg) {
                     const defs = svg.querySelector("defs");
                     const pattern = defs?.querySelector("#hatchGreen");
                     if (!pattern) {
-                        // Pattern henüz hazır değil, tekrar dene
+                        // Pattern not ready yet, try again
                         requestAnimationFrame(applyHatchPattern);
                         return;
                     }
                 }
                 
-                // SVG path elementine direkt hatch pattern uygula
+                // Apply hatch pattern directly to SVG path element
                 layer._path.setAttribute("fill", "url(#hatchGreen)");
                 layer._path.setAttribute("fill-opacity", "0.8");
-                // CSS style'ı important ile set et ki Leaflet override edemesin
+                // Set CSS style with important so Leaflet can't override it
                 layer._path.style.setProperty("fill", "url(#hatchGreen)", "important");
                 layer._path.style.setProperty("fill-opacity", "0.8", "important");
             }
         };
 
-        // Layer eklendiğinde hatch pattern uygula
+        // Apply hatch pattern when layer is added
         layer.on("add", () => {
             if (feature.properties.status === "done") {
                 requestAnimationFrame(() => {
@@ -530,7 +530,7 @@ export default function App() {
             }
         });
 
-        // Path elementini izle ve pattern'i sürekli uygula (Leaflet override ederse)
+        // Monitor path element and continuously apply pattern (if Leaflet overrides it)
         if (feature.properties.status === "done") {
             const observer = new MutationObserver(() => {
                 if (layer._path && feature.properties.status === "done") {
@@ -541,7 +541,7 @@ export default function App() {
                 }
             });
 
-            // Path elementi oluştuğunda observer'ı başlat
+            // Start observer when path element is created
             const startObserver = () => {
                 if (layer._path) {
                     observer.observe(layer._path, {
@@ -563,7 +563,7 @@ export default function App() {
             });
         }
 
-        // Eğer layer zaten ekliyse ve done ise, direkt uygula
+        // If layer is already added and done, apply directly
         if (feature.properties.status === "done") {
             requestAnimationFrame(() => {
                 requestAnimationFrame(applyHatchPattern);
@@ -578,16 +578,16 @@ export default function App() {
 
         layer.on("mouseout", function () {
             if (feature.properties.status === "done") {
-                // Done olan masalarda hatch pattern'i geri yükle
+                // Restore hatch pattern on done tables
                 this.setStyle(styleFn(feature));
                 if (this._path) {
-                    // Pattern'in hazır olduğundan emin ol
+                    // Ensure pattern is ready
                     const svg = this._path.ownerSVGElement;
                     if (svg) {
                         const defs = svg.querySelector("defs");
                         const pattern = defs?.querySelector("#hatchGreen");
                         if (pattern) {
-                            // Hatch pattern'i geri yükle
+                            // Restore hatch pattern
                             this._path.setAttribute("fill", "url(#hatchGreen)");
                             this._path.setAttribute("fill-opacity", "0.8");
                             this._path.style.setProperty("fill", "url(#hatchGreen)", "important");
@@ -601,13 +601,13 @@ export default function App() {
             if (this._path) this._path.classList.remove("panel-hover");
         });
 
-        // Context menu'yu engelle (sağ tık menüsü)
+        // Prevent context menu (right-click menu)
         layer.on("contextmenu", function (e) {
             e.originalEvent.preventDefault();
             e.originalEvent.stopPropagation();
         });
 
-        // Sol tık → masa DONE
+        // Left click → table DONE
         layer.on("click", function (e) {
             if (e.originalEvent.button !== 0) return;
             if (feature.properties.status === "done") return;
@@ -616,11 +616,11 @@ export default function App() {
             e.originalEvent.stopPropagation();
             e.originalEvent.stopImmediatePropagation();
 
-            // Direkt olarak DONE yap
+            // Directly set to DONE
             setStatusByLayer(layer, "done");
         });
 
-        // Sağ tık → masa TODO (unselect)
+        // Right click → table TODO (unselect)
         layer.on("mousedown", function (e) {
             if (e.originalEvent.button !== 2) return;
             
@@ -628,7 +628,7 @@ export default function App() {
             e.originalEvent.stopPropagation();
             e.originalEvent.stopImmediatePropagation();
 
-            // Direkt olarak TODO yap
+            // Directly set to TODO
             setStatusByLayer(layer, "todo");
         });
 
@@ -677,13 +677,19 @@ export default function App() {
     return (
         <div className="app">
             <div className="topbar">
-                <div className="stat">Total: <b>{stats.total}</b></div>
-                <div className="stat">Done: <b style={{ color: "#22c55e" }}>{stats.done}</b></div>
-                <div className="stat">Remaining: <b style={{ color: "#f59e0b" }}>{stats.remaining}</b></div>
-
-                <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                    <button className="ui" onClick={exportCSV}>Export CSV</button>
-                    <button className="ui" onClick={resetAll}>Reset All</button>
+                <div className="topbar-left">
+                    <div className="stat">Total: <b>{stats.total}</b></div>
+                    <div className="stat">Done: <b style={{ color: "#22c55e" }}>{stats.done}</b></div>
+                    <div className="stat">Remaining: <b style={{ color: "#f59e0b" }}>{stats.remaining}</b></div>
+                </div>
+                <div className="topbar-title">
+                    PV Module Installation Progress Tracking
+                </div>
+                <div className="topbar-right">
+                    <div style={{ display: "flex", gap: 8 }}>
+                        <button className="ui" onClick={exportCSV}>Export CSV</button>
+                        <button className="ui" onClick={resetAll}>Reset All</button>
+                    </div>
                 </div>
             </div>
 
