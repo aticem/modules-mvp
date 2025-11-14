@@ -365,7 +365,8 @@ export default function App() {
             (s, f) => s + (f.properties.status === "done" ? (f.properties.total_panels || 1) : 0),
             0
         );
-        return { total, done, remaining: total - done };
+        const percentage = total > 0 ? ((done / total) * 100).toFixed(2) : "0.00";
+        return { total, done, remaining: total - done, percentage };
     }, [features]);
 
     /* --------------------------------------------------------------
@@ -679,7 +680,7 @@ export default function App() {
             <div className="topbar">
                 <div className="topbar-left">
                     <div className="stat">Total: <b>{stats.total}</b></div>
-                    <div className="stat">Done: <b style={{ color: "#22c55e" }}>{stats.done}</b></div>
+                    <div className="stat">Done: <b style={{ color: "#22c55e" }}>{stats.done}</b>, <b style={{ color: "#22c55e" }}>%{stats.percentage}</b></div>
                     <div className="stat">Remaining: <b style={{ color: "#f59e0b" }}>{stats.remaining}</b></div>
                 </div>
                 <div className="topbar-title">
