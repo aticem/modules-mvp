@@ -3,6 +3,7 @@ import { MapContainer, GeoJSON, useMap } from "react-leaflet";
 import L from "leaflet";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import { point } from "@turf/turf";
+import ExcelJS from "exceljs";
 import "./index.css";
 
 /* --------------------------------------------------------------
@@ -306,10 +307,75 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
 /* --------------------------------------------------------------
    MAIN APP
 -------------------------------------------------------------- */
+/* --------------------------------------------------------------
+   Submit Daily Work Modal
+-------------------------------------------------------------- */
+function SubmitModal({ isOpen, onClose, onSubmit, dailyInstalled }) {
+    const [subcontractor, setSubcontractor] = useState("");
+    const [workers, setWorkers] = useState("");
+
+    if (!isOpen) return null;
+
+    const handleSubmit = () => {
+        if (!subcontractor.trim() || !workers.trim()) {
+            alert("Please fill in all fields");
+            return;
+        }
+        const workerCount = parseInt(workers, 10);
+        if (isNaN(workerCount) || workerCount <= 0) {
+            alert("Please enter a valid number of workers");
+            return;
+        }
+        onSubmit(subcontractor.trim(), workerCount);
+        setSubcontractor("");
+        setWorkers("");
+        onClose();
+    };
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                <h2>Submit Daily Work</h2>
+                <div className="modal-info">
+                    <p>Today's installed panels: <strong>{dailyInstalled}</strong></p>
+                </div>
+                <div className="modal-form">
+                    <label>
+                        Subcontractor name
+                        <input
+                            type="text"
+                            value={subcontractor}
+                            onChange={(e) => setSubcontractor(e.target.value)}
+                            placeholder="e.g., BZ Construction"
+                            autoFocus
+                        />
+                    </label>
+                    <label>
+                        Number of workers
+                        <input
+                            type="number"
+                            value={workers}
+                            onChange={(e) => setWorkers(e.target.value)}
+                            placeholder="e.g., 15"
+                            min="1"
+                        />
+                    </label>
+                </div>
+                <div className="modal-actions">
+                    <button className="ui" onClick={onClose}>Cancel</button>
+                    <button className="ui" onClick={handleSubmit} style={{ background: "#22c55e" }}>Save / Submit</button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export default function App() {
     const [base, setBase] = useState(null);
     const [features, setFeatures] = useState([]);
     const [geoKey, setGeoKey] = useState(0);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [dailyLog, setDailyLog] = useState([]);
 
     const layersRef = useRef([]);
 
@@ -358,6 +424,18 @@ export default function App() {
         load();
     }, []);
 
+    /* load daily log from localStorage */
+    useEffect(() => {
+        const stored = localStorage.getItem("dailyLog");
+        if (stored) {
+            try {
+                setDailyLog(JSON.parse(stored));
+            } catch (e) {
+                console.error("Failed to parse dailyLog from localStorage", e);
+            }
+        }
+    }, []);
+
     /* stats */
     const stats = useMemo(() => {
         const total = features.reduce((s, f) => s + (f.properties.total_panels || 1), 0);
@@ -368,6 +446,28 @@ export default function App() {
         const percentage = total > 0 ? ((done / total) * 100).toFixed(2) : "0.00";
         return { total, done, remaining: total - done, percentage };
     }, [features]);
+
+    /* calculate daily installed panels */
+    const dailyInstalled = useMemo(() => {
+        return features
+            .filter(f => f.properties.status === "done")
+            .reduce((s, f) => s + (f.properties.total_panels || 1), 0);
+    }, [features]);
+
+    /* submit daily work */
+    const handleSubmitDailyWork = (subcontractor, workers) => {
+        const record = {
+            date: new Date().toISOString().slice(0, 10),
+            installed_panels: dailyInstalled,
+            subcontractor,
+            workers
+        };
+
+        const existing = JSON.parse(localStorage.getItem("dailyLog") || "[]");
+        existing.push(record);
+        localStorage.setItem("dailyLog", JSON.stringify(existing));
+        setDailyLog([...existing]);
+    };
 
     /* --------------------------------------------------------------
        STYLES
@@ -637,26 +737,163 @@ export default function App() {
     };
 
     /* EXPORT */
-    const exportCSV = () => {
-        const rows = [
-            ["panel_id", "status", "total_panels"],
-            ...features.map(f => [
-                f.properties.panel_id,
-                f.properties.status,
-                f.properties.total_panels || 1
-            ])
-        ];
-        const csv = rows.map(r => r.join(",")).join("\n");
+    const exportCSV = async () => {
+        try {
+            console.log("Export started...");
+            const daily = JSON.parse(localStorage.getItem("dailyLog") || "[]");
+            
+            if (daily.length === 0) {
+                alert("No daily log data to export");
+                return;
+            }
 
-        const blob = new Blob([csv], { type: "text/csv" });
-        const url = URL.createObjectURL(blob);
+            console.log("Daily log data:", daily);
 
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "panel-status.csv";
-        a.click();
+            // Group by date and aggregate
+            const groupedByDate = {};
+            daily.forEach(record => {
+                const date = record.date;
+                if (!groupedByDate[date]) {
+                    groupedByDate[date] = {
+                        date,
+                        installed_panels: 0,
+                        workers: [] // Store workers values for labels
+                    };
+                }
+                groupedByDate[date].installed_panels += record.installed_panels || 0;
+                // Keep workers value for data labels (workers + subcontractor first 3 letters)
+                const subFirst3 = record.subcontractor ? record.subcontractor.substring(0, 3).toUpperCase() : "";
+                const label = record.workers > 0 ? `${record.workers} ${subFirst3}`.trim() : "";
+                groupedByDate[date].workers.push(label);
+            });
 
-        URL.revokeObjectURL(url);
+            // Convert to array and sort by date
+            const chartData = Object.values(groupedByDate)
+                .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+            console.log("Chart data (grouped):", chartData);
+
+            // Sort daily log by date
+            const sortedDaily = [...daily].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+            console.log("Loading template...");
+            
+            // Load template Excel file
+            let workbook;
+            try {
+                const templateResponse = await fetch("/template.xlsx");
+                if (!templateResponse.ok) {
+                    throw new Error(`Template file not found (HTTP ${templateResponse.status}). Please create template.xlsx in public folder.`);
+                }
+                
+                const templateBuffer = await templateResponse.arrayBuffer();
+                
+                // Check if buffer is empty or invalid
+                if (!templateBuffer || templateBuffer.byteLength === 0) {
+                    throw new Error("Template file is empty or corrupted.");
+                }
+                
+                workbook = new ExcelJS.Workbook();
+                await workbook.xlsx.load(templateBuffer);
+                
+                console.log("Template loaded successfully");
+            } catch (error) {
+                console.error("Template loading error:", error);
+                alert(`Template file error: ${error.message}\n\nPlease create template.xlsx file in public folder:\n\n1. Open Excel\n2. Create sheet named "Chart"\n3. Add headers: A1=date, B1=installed_panels, C1=workers\n4. Insert Column Chart\n5. Configure chart:\n   - Series: B2:B20\n   - X-axis: A2:A20\n   - Data Labels: Value From Cells = C2:C20\n   - Label Position: Inside End\n6. Save as template.xlsx in public folder`);
+                return;
+            }
+
+            // Get Chart sheet
+            const chartSheet = workbook.getWorksheet("Chart");
+            if (!chartSheet) {
+                alert("Template file must have a sheet named 'Chart'");
+                return;
+            }
+
+            // Clear old data (rows 2-20)
+            for (let i = 2; i <= 20; i++) {
+                const row = chartSheet.getRow(i);
+                row.getCell(1).value = null; // date
+                row.getCell(2).value = null; // installed_panels
+                row.getCell(3).value = null; // workers (label)
+            }
+
+            // Write new data
+            let rowIndex = 2;
+            chartData.forEach(item => {
+                // For each date, create one row with aggregated installed_panels
+                // and combine all workers labels (if multiple entries for same date)
+                const row = chartSheet.getRow(rowIndex);
+                row.getCell(1).value = item.date; // date
+                row.getCell(2).value = item.installed_panels; // installed_panels
+                
+                // Combine all workers labels for this date (separated by newline or comma)
+                // Excel will show them in data labels
+                const workersLabel = item.workers.filter(w => w).join("\n"); // Newline separated
+                row.getCell(3).value = workersLabel || ""; // workers (label)
+                
+                row.commit();
+                rowIndex++;
+                
+                // Stop at row 20 (template limit)
+                if (rowIndex > 20) return;
+            });
+
+            // Sheet 2: Daily Log (full data)
+            let dailyLogSheet = workbook.getWorksheet("Daily Log");
+            if (!dailyLogSheet) {
+                dailyLogSheet = workbook.addWorksheet("Daily Log");
+                dailyLogSheet.addRow(["date", "installed_panels", "workers", "subcontractor"]);
+            } else {
+                // Clear old data
+                const lastRow = dailyLogSheet.lastRow?.number || 1;
+                for (let i = 2; i <= lastRow; i++) {
+                    const row = dailyLogSheet.getRow(i);
+                    row.getCell(1).value = null;
+                    row.getCell(2).value = null;
+                    row.getCell(3).value = null;
+                    row.getCell(4).value = null;
+                }
+            }
+            
+            // Add data rows
+            sortedDaily.forEach(record => {
+                dailyLogSheet.addRow([
+                    record.date,
+                    record.installed_panels,
+                    record.workers,
+                    record.subcontractor
+                ]);
+            });
+
+            // Style header row for Daily Log
+            const logHeaderRow = dailyLogSheet.getRow(1);
+            logHeaderRow.font = { bold: true };
+            logHeaderRow.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FF1e293b' }
+            };
+            logHeaderRow.font = { bold: true, color: { argb: 'FFe5e7eb' } };
+
+            // Write file
+            console.log("Writing file...");
+            const buffer = await workbook.xlsx.writeBuffer();
+            
+            const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "daily-log.xlsx";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            console.log("Export completed!");
+        } catch (error) {
+            console.error("Export error:", error);
+            alert(`Export failed: ${error.message}`);
+        }
     };
 
     const resetAll = () => {
@@ -688,7 +925,8 @@ export default function App() {
                 </div>
                 <div className="topbar-right">
                     <div style={{ display: "flex", gap: 8 }}>
-                        <button className="ui" onClick={exportCSV}>Export CSV</button>
+                        <button className="ui" onClick={() => setIsModalOpen(true)}>Submit Daily Work</button>
+                        <button className="ui" onClick={exportCSV}>Export Excel</button>
                         <button className="ui" onClick={resetAll}>Reset All</button>
                     </div>
                 </div>
@@ -724,6 +962,13 @@ export default function App() {
                     </>
                 )}
             </MapContainer>
+
+            <SubmitModal
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                onSubmit={handleSubmitDailyWork}
+                dailyInstalled={dailyInstalled}
+            />
         </div>
     );
 }
