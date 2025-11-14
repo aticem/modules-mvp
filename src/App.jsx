@@ -4,7 +4,12 @@ import L from "leaflet";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import { point } from "@turf/turf";
 import ExcelJS from "exceljs";
+import Chart from "chart.js/auto";
+import ChartDataLabels from "chartjs-plugin-datalabels";
 import "./index.css";
+
+// Register ChartDataLabels plugin
+Chart.register(ChartDataLabels);
 
 /* --------------------------------------------------------------
    SVG HATCH PATTERN
@@ -311,13 +316,23 @@ function SelectionTools({ layersRef, setStatusByLayer }) {
    Submit Daily Work Modal
 -------------------------------------------------------------- */
 function SubmitModal({ isOpen, onClose, onSubmit, dailyInstalled }) {
+    // Initialize date with today's date in YYYY-MM-DD format
+    const today = new Date().toISOString().slice(0, 10);
+    const [date, setDate] = useState(today);
     const [subcontractor, setSubcontractor] = useState("");
     const [workers, setWorkers] = useState("");
+
+    // Reset date to today when modal opens
+    useEffect(() => {
+        if (isOpen) {
+            setDate(new Date().toISOString().slice(0, 10));
+        }
+    }, [isOpen]);
 
     if (!isOpen) return null;
 
     const handleSubmit = () => {
-        if (!subcontractor.trim() || !workers.trim()) {
+        if (!date || !subcontractor.trim() || !workers.trim()) {
             alert("Please fill in all fields");
             return;
         }
@@ -326,7 +341,8 @@ function SubmitModal({ isOpen, onClose, onSubmit, dailyInstalled }) {
             alert("Please enter a valid number of workers");
             return;
         }
-        onSubmit(subcontractor.trim(), workerCount);
+        onSubmit(date, subcontractor.trim(), workerCount);
+        setDate(today);
         setSubcontractor("");
         setWorkers("");
         onClose();
@@ -340,6 +356,14 @@ function SubmitModal({ isOpen, onClose, onSubmit, dailyInstalled }) {
                     <p>Today's installed panels: <strong>{dailyInstalled}</strong></p>
                 </div>
                 <div className="modal-form">
+                    <label>
+                        Date
+                        <input
+                            type="date"
+                            value={date}
+                            onChange={(e) => setDate(e.target.value)}
+                        />
+                    </label>
                     <label>
                         Subcontractor name
                         <input
@@ -455,9 +479,9 @@ export default function App() {
     }, [features]);
 
     /* submit daily work */
-    const handleSubmitDailyWork = (subcontractor, workers) => {
+    const handleSubmitDailyWork = (date, subcontractor, workers) => {
         const record = {
-            date: new Date().toISOString().slice(0, 10),
+            date: date,
             installed_panels: dailyInstalled,
             subcontractor,
             workers
@@ -737,10 +761,111 @@ export default function App() {
     };
 
     /* EXPORT */
+    // Chart reference
+    const chartRef = useRef(null);
+
+    // Function to build chart
+    const buildChart = (dailyLog) => {
+        // Destroy existing chart if any
+        if (chartRef.current) {
+            chartRef.current.destroy();
+            chartRef.current = null;
+        }
+
+        const canvas = document.getElementById("dailyChart");
+        if (!canvas) {
+            console.error("Canvas element not found");
+            return null;
+        }
+
+        const ctx = canvas.getContext("2d");
+        
+        const chart = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels: dailyLog.map(d => d.date),
+                datasets: [
+                    {
+                        label: "Installed Panels",
+                        data: dailyLog.map(d => d.installed_panels),
+                        backgroundColor: "rgba(0, 102, 204, 0.8)",
+                        borderColor: "#000",
+                        borderWidth: 1
+                    }
+                ]
+            },
+            plugins: [ChartDataLabels],
+            options: {
+                responsive: false,
+                maintainAspectRatio: false,
+                barPercentage: 0.5, // Bar width is 50% of category width (thinner bars)
+                categoryPercentage: 0.8, // Spacing between categories
+                plugins: {
+                    datalabels: {
+                        anchor: "end",
+                        align: "end",
+                        color: "#000",
+                        font: { weight: "bold", size: 12 },
+                        formatter: (value, ctx) => {
+                            const row = dailyLog[ctx.dataIndex];
+                            if (!row) return "";
+                            const subFirst3 = row.subcontractor ? row.subcontractor.slice(0, 3).toUpperCase() : "";
+                            return `${row.workers}\n${subFirst3}`;
+                        }
+                    },
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Date',
+                            font: { size: 12, weight: 'bold' }
+                        },
+                        ticks: { 
+                            maxRotation: 0, 
+                            minRotation: 0,
+                            font: { size: 10 }
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Installed Panels',
+                            font: { size: 12, weight: 'bold' }
+                        },
+                        beginAtZero: true,
+                        ticks: {
+                            font: { size: 10 }
+                        }
+                    }
+                }
+            }
+        });
+
+        chartRef.current = chart;
+        return chart;
+    };
+
     const exportCSV = async () => {
         try {
             console.log("Export started...");
-            const daily = JSON.parse(localStorage.getItem("dailyLog") || "[]");
+            
+            // Get daily log from localStorage
+            const stored = localStorage.getItem("dailyLog");
+            console.log("Stored dailyLog in localStorage:", stored);
+            
+            const daily = stored ? JSON.parse(stored) : [];
+            console.log("Parsed daily log:", daily);
+            
+            if (!Array.isArray(daily)) {
+                console.error("Invalid dailyLog format, clearing...");
+                localStorage.removeItem("dailyLog");
+                alert("Daily log data is corrupted. It has been cleared. Please try again.");
+                return;
+            }
             
             if (daily.length === 0) {
                 alert("No daily log data to export");
@@ -749,112 +874,75 @@ export default function App() {
 
             console.log("Daily log data:", daily);
 
-            // Group by date and aggregate
-            const groupedByDate = {};
+            // Aggregate by date: sum installed_panels and workers, combine subcontractors
+            const aggregatedByDate = {};
             daily.forEach(record => {
                 const date = record.date;
-                if (!groupedByDate[date]) {
-                    groupedByDate[date] = {
-                        date,
+                if (!aggregatedByDate[date]) {
+                    aggregatedByDate[date] = {
+                        date: date,
                         installed_panels: 0,
-                        workers: [] // Store workers values for labels
+                        workers: 0,
+                        subcontractors: []
                     };
                 }
-                groupedByDate[date].installed_panels += record.installed_panels || 0;
-                // Keep workers value for data labels (workers + subcontractor first 3 letters)
-                const subFirst3 = record.subcontractor ? record.subcontractor.substring(0, 3).toUpperCase() : "";
-                const label = record.workers > 0 ? `${record.workers} ${subFirst3}`.trim() : "";
-                groupedByDate[date].workers.push(label);
+                aggregatedByDate[date].installed_panels += (record.installed_panels || 0);
+                aggregatedByDate[date].workers += (record.workers || 0);
+                if (record.subcontractor && !aggregatedByDate[date].subcontractors.includes(record.subcontractor)) {
+                    aggregatedByDate[date].subcontractors.push(record.subcontractor);
+                }
             });
 
-            // Convert to array and sort by date
-            const chartData = Object.values(groupedByDate)
-                .sort((a, b) => new Date(a.date) - new Date(b.date));
+            // Convert to array and format for chart (use first subcontractor's first 3 letters)
+            const aggregatedDaily = Object.values(aggregatedByDate).map(item => ({
+                date: item.date,
+                installed_panels: item.installed_panels,
+                workers: item.workers,
+                subcontractor: item.subcontractors.length > 0 ? item.subcontractors[0] : ""
+            }));
 
-            console.log("Chart data (grouped):", chartData);
+            // Sort by date
+            const sortedDaily = aggregatedDaily.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-            // Sort daily log by date
-            const sortedDaily = [...daily].sort((a, b) => new Date(a.date) - new Date(b.date));
-
-            console.log("Loading template...");
+            // Create and render chart
+            console.log("Creating chart...");
+            const chart = buildChart(sortedDaily);
             
-            // Load template Excel file
-            let workbook;
-            try {
-                const templateResponse = await fetch("/template.xlsx");
-                if (!templateResponse.ok) {
-                    throw new Error(`Template file not found (HTTP ${templateResponse.status}). Please create template.xlsx in public folder.`);
-                }
-                
-                const templateBuffer = await templateResponse.arrayBuffer();
-                
-                // Check if buffer is empty or invalid
-                if (!templateBuffer || templateBuffer.byteLength === 0) {
-                    throw new Error("Template file is empty or corrupted.");
-                }
-                
-                workbook = new ExcelJS.Workbook();
-                await workbook.xlsx.load(templateBuffer);
-                
-                console.log("Template loaded successfully");
-            } catch (error) {
-                console.error("Template loading error:", error);
-                alert(`Template file error: ${error.message}\n\nPlease create template.xlsx file in public folder:\n\n1. Open Excel\n2. Create sheet named "Chart"\n3. Add headers: A1=date, B1=installed_panels, C1=workers\n4. Insert Column Chart\n5. Configure chart:\n   - Series: B2:B20\n   - X-axis: A2:A20\n   - Data Labels: Value From Cells = C2:C20\n   - Label Position: Inside End\n6. Save as template.xlsx in public folder`);
-                return;
+            if (!chart) {
+                throw new Error("Failed to create chart");
             }
 
-            // Get Chart sheet
-            const chartSheet = workbook.getWorksheet("Chart");
-            if (!chartSheet) {
-                alert("Template file must have a sheet named 'Chart'");
-                return;
+            // Wait a bit for chart to render
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Get canvas and convert to PNG
+            const canvas = document.getElementById("dailyChart");
+            if (!canvas) {
+                throw new Error("Canvas element not found");
             }
 
-            // Clear old data (rows 2-20)
-            for (let i = 2; i <= 20; i++) {
-                const row = chartSheet.getRow(i);
-                row.getCell(1).value = null; // date
-                row.getCell(2).value = null; // installed_panels
-                row.getCell(3).value = null; // workers (label)
-            }
+            const pngDataUrl = canvas.toDataURL("image/png");
+            console.log("Chart converted to PNG");
 
-            // Write new data
-            let rowIndex = 2;
-            chartData.forEach(item => {
-                // For each date, create one row with aggregated installed_panels
-                // and combine all workers labels (if multiple entries for same date)
-                const row = chartSheet.getRow(rowIndex);
-                row.getCell(1).value = item.date; // date
-                row.getCell(2).value = item.installed_panels; // installed_panels
-                
-                // Combine all workers labels for this date (separated by newline or comma)
-                // Excel will show them in data labels
-                const workersLabel = item.workers.filter(w => w).join("\n"); // Newline separated
-                row.getCell(3).value = workersLabel || ""; // workers (label)
-                
-                row.commit();
-                rowIndex++;
-                
-                // Stop at row 20 (template limit)
-                if (rowIndex > 20) return;
-            });
+            // Create workbook
+            console.log("Creating workbook...");
+            const workbook = new ExcelJS.Workbook();
 
-            // Sheet 2: Daily Log (full data)
-            let dailyLogSheet = workbook.getWorksheet("Daily Log");
-            if (!dailyLogSheet) {
-                dailyLogSheet = workbook.addWorksheet("Daily Log");
-                dailyLogSheet.addRow(["date", "installed_panels", "workers", "subcontractor"]);
-            } else {
-                // Clear old data
-                const lastRow = dailyLogSheet.lastRow?.number || 1;
-                for (let i = 2; i <= lastRow; i++) {
-                    const row = dailyLogSheet.getRow(i);
-                    row.getCell(1).value = null;
-                    row.getCell(2).value = null;
-                    row.getCell(3).value = null;
-                    row.getCell(4).value = null;
-                }
-            }
+            // Sheet1: Daily Log
+            const dailyLogSheet = workbook.addWorksheet("Daily Log");
+            
+            // Add headers
+            dailyLogSheet.addRow(["date", "installed_panels", "workers", "subcontractor"]);
+            
+            // Style header row
+            const headerRow = dailyLogSheet.getRow(1);
+            headerRow.font = { bold: true };
+            headerRow.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FF1e293b' }
+            };
+            headerRow.font = { bold: true, color: { argb: 'FFe5e7eb' } };
             
             // Add data rows
             sortedDaily.forEach(record => {
@@ -866,37 +954,100 @@ export default function App() {
                 ]);
             });
 
-            // Style header row for Daily Log
-            const logHeaderRow = dailyLogSheet.getRow(1);
-            logHeaderRow.font = { bold: true };
-            logHeaderRow.fill = {
-                type: 'pattern',
-                pattern: 'solid',
-                fgColor: { argb: 'FF1e293b' }
-            };
-            logHeaderRow.font = { bold: true, color: { argb: 'FFe5e7eb' } };
+            // Auto-fit columns
+            dailyLogSheet.columns.forEach(column => {
+                column.width = 20;
+            });
 
-            // Write file
+            // Sheet2: Chart (PNG)
+            const chartSheet = workbook.addWorksheet("Chart");
+            
+            // Convert base64 data URL to base64 string
+            const base64Data = pngDataUrl.split(',')[1];
+            
+            // Convert base64 string to Uint8Array for browser
+            const binaryString = atob(base64Data);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            
+            // Add image to Excel
+            const imageId = workbook.addImage({
+                buffer: bytes,
+                extension: 'png'
+            });
+
+            // Add image at the top-left corner (A1)
+            chartSheet.addImage(imageId, {
+                tl: { col: 0, row: 0 },
+                ext: { width: 900, height: 500 }
+            });
+
+            // Set column width and row height for chart sheet to fit the image
+            chartSheet.getColumn(1).width = 100;
+            chartSheet.getRow(1).height = 400;
+            
+            // Freeze first row and column to keep chart visible when scrolling
+            chartSheet.views = [{
+                state: 'frozen',
+                xSplit: 0,
+                ySplit: 0
+            }];
+
+            // Export
             console.log("Writing file...");
             const buffer = await workbook.xlsx.writeBuffer();
             
-            const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+            const blob = new Blob([buffer], { 
+                type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" 
+            });
+            
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
-            a.download = "daily-log.xlsx";
+            a.download = "progress_report.xlsx";
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            console.log("Export completed!");
+            
+            // Clean up chart
+            if (chartRef.current) {
+                chartRef.current.destroy();
+                chartRef.current = null;
+            }
+            
+            console.log("Export completed successfully!");
         } catch (error) {
-            console.error("Export error:", error);
-            alert(`Export failed: ${error.message}`);
+            console.error("Export error details:", error);
+            console.error("Error stack:", error.stack);
+            alert(`Export error: ${error.message}\n\nPlease open browser console (F12) to check detailed error.`);
+            
+            // Clean up chart on error
+            if (chartRef.current) {
+                chartRef.current.destroy();
+                chartRef.current = null;
+            }
         }
     };
 
     const resetAll = () => {
+        // Show confirmation dialog
+        const confirmed = window.confirm(
+            "Are you sure you want to reset all data?\n\n" +
+            "This will:\n" +
+            "- Reset all panel statuses to 'todo'\n" +
+            "- Clear all daily log entries from memory and storage\n" +
+            "- This action cannot be undone\n\n" +
+            "Click OK to confirm or Cancel to abort."
+        );
+        
+        if (!confirmed) {
+            return;
+        }
+
+        // Reset panel statuses
         setFeatures(prev =>
             prev.map(f => ({
                 ...f,
@@ -905,6 +1056,20 @@ export default function App() {
         );
         setGeoKey(k => k + 1);
         layersRef.current = [];
+
+        // Clear daily log from localStorage and state
+        localStorage.removeItem("dailyLog");
+        setDailyLog([]);
+        
+        // Verify localStorage is cleared
+        const remaining = localStorage.getItem("dailyLog");
+        if (remaining) {
+            console.error("Failed to clear dailyLog from localStorage:", remaining);
+            // Force clear
+            localStorage.setItem("dailyLog", "[]");
+        }
+        
+        console.log("Reset completed: All panel statuses and daily log entries have been cleared.");
     };
 
     const liveGeo = useMemo(
@@ -968,6 +1133,14 @@ export default function App() {
                 onClose={() => setIsModalOpen(false)}
                 onSubmit={handleSubmitDailyWork}
                 dailyInstalled={dailyInstalled}
+            />
+
+            {/* Hidden canvas for chart generation */}
+            <canvas 
+                id="dailyChart" 
+                width="900" 
+                height="500"
+                style={{ position: "absolute", left: "-9999px", top: "-9999px" }}
             />
         </div>
     );

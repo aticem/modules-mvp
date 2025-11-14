@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@turf/turf": "^7.0.0",
+    "chart.js": "^4.5.1",
+    "chartjs-plugin-datalabels": "^2.2.0",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
     "leaflet": "1.9.4",
