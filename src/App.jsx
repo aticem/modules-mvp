@@ -88,6 +88,37 @@ function FitToDataOnce({ geojson }) {
     return null;
 }
 
+/* Ensure lines stay in background */
+function BringLinesToBack() {
+    const map = useMap();
+    
+    useEffect(() => {
+        // Find all layers and bring lines to back
+        const bringLinesBack = () => {
+            map.eachLayer((layer) => {
+                if (layer.feature?.properties?._isLinesLayer || 
+                    (layer.options && layer.options.interactive === false && layer._path)) {
+                    if (layer.bringToBack) {
+                        layer.bringToBack();
+                    }
+                }
+            });
+        };
+        
+        // Try multiple times to ensure it happens after all layers are added
+        bringLinesBack();
+        const timeout1 = setTimeout(bringLinesBack, 100);
+        const timeout2 = setTimeout(bringLinesBack, 500);
+        
+        return () => {
+            clearTimeout(timeout1);
+            clearTimeout(timeout2);
+        };
+    }, [map]);
+    
+    return null;
+}
+
 /* --------------------------------------------------------------
    SelectionTools
 -------------------------------------------------------------- */
@@ -397,6 +428,7 @@ function SubmitModal({ isOpen, onClose, onSubmit, dailyInstalled }) {
 export default function App() {
     const [base, setBase] = useState(null);
     const [features, setFeatures] = useState([]);
+    const [linesGeo, setLinesGeo] = useState(null);
     const [geoKey, setGeoKey] = useState(0);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [dailyLog, setDailyLog] = useState([]);
@@ -404,6 +436,70 @@ export default function App() {
     const layersRef = useRef([]);
 
     const svgRenderer = useMemo(() => L.svg(), []);
+
+    /* load lines.geojson - visual only, background layer */
+    useEffect(() => {
+        const load = async () => {
+            const urls = ["lines.geojson", "/lines.geojson", "/public/lines.geojson"];
+            let text = null;
+
+            for (const u of urls) {
+                try {
+                    const r = await fetch(u, { cache: "no-store" });
+                    if (!r.ok) continue;
+
+                    const t = await r.text();
+                    if (!t.trim().startsWith("<") && t.trim()) {
+                        text = t;
+                        break;
+                    }
+                } catch {}
+            }
+
+            if (text) {
+                try {
+                    const gj = JSON.parse(text);
+                    
+                    // Filter out invalid LineStrings (same coordinates - points)
+                    const validFeatures = gj.features?.filter((feature) => {
+                        if (feature.geometry?.type === "LineString") {
+                            const coords = feature.geometry.coordinates;
+                            if (coords && coords.length >= 2) {
+                                // Check if coordinates are different
+                                const first = coords[0];
+                                const last = coords[coords.length - 1];
+                                // At least 2 different coordinates needed
+                                if (coords.length > 2 || 
+                                    Math.abs(first[0] - last[0]) > 0.000001 || 
+                                    Math.abs(first[1] - last[1]) > 0.000001) {
+                                    return true;
+                                }
+                            }
+                        }
+                        return false;
+                    }) || [];
+                    
+                    const processedGeoJson = {
+                        ...gj,
+                        features: validFeatures
+                    };
+                    
+                    console.log(`Lines GeoJSON loaded: ${gj.features?.length || 0} features, ${validFeatures.length} valid LineStrings (visual only, background)`);
+                    
+                    // Debug: Log first few valid features
+                    if (validFeatures.length > 0) {
+                        console.log("Sample lines feature:", validFeatures[0]);
+                    }
+                    
+                    setLinesGeo(processedGeoJson);
+                } catch (e) {
+                    console.error("Failed to parse lines.geojson", e);
+                }
+            }
+        };
+
+        load();
+    }, []);
 
     /* load geojson */
     useEffect(() => {
@@ -435,7 +531,10 @@ export default function App() {
                 properties: {
                     ...f.properties,
                     panel_id: f.properties.panel_id || `P${i + 1}`,
-                    total_panels: f.properties.total_panels || 1, // Use 1 if total_panels is missing
+                    // Only use total_panels if it exists and is a valid number, otherwise 0 (don't count tables)
+                    total_panels: (f.properties.total_panels !== undefined && f.properties.total_panels !== null) 
+                        ? Number(f.properties.total_panels) || 0 
+                        : 0,
                     status: f.properties.status || "todo"
                 }
             }));
@@ -462,9 +561,10 @@ export default function App() {
 
     /* stats */
     const stats = useMemo(() => {
-        const total = features.reduce((s, f) => s + (f.properties.total_panels || 1), 0);
+        // Only count panels, not tables (total_panels must be > 0)
+        const total = features.reduce((s, f) => s + (f.properties.total_panels || 0), 0);
         const done = features.reduce(
-            (s, f) => s + (f.properties.status === "done" ? (f.properties.total_panels || 1) : 0),
+            (s, f) => s + (f.properties.status === "done" ? (f.properties.total_panels || 0) : 0),
             0
         );
         const percentage = total > 0 ? ((done / total) * 100).toFixed(2) : "0.00";
@@ -473,9 +573,10 @@ export default function App() {
 
     /* calculate daily installed panels */
     const dailyInstalled = useMemo(() => {
+        // Only count panels, not tables (total_panels must be > 0)
         return features
             .filter(f => f.properties.status === "done")
-            .reduce((s, f) => s + (f.properties.total_panels || 1), 0);
+            .reduce((s, f) => s + (f.properties.total_panels || 0), 0);
     }, [features]);
 
     /* submit daily work */
@@ -496,6 +597,18 @@ export default function App() {
     /* --------------------------------------------------------------
        STYLES
 -------------------------------------------------------------- */
+    /* Visual-only style for lines.geojson - background layer, no interaction */
+    const linesStyleFn = (feature) => {
+        return {
+            weight: 4.0,
+            color: "#ef4444", // Red for testing - change back to gray later
+            opacity: 1.0, // Full opacity
+            fill: false,
+            interactive: false,
+            pointerEvents: "none"
+        };
+    };
+
     const styleFn = (feat) => {
         const base = {
             weight: 1.0,
@@ -1107,6 +1220,40 @@ export default function App() {
                 style={{ height: "calc(100vh - 54px)", width: "100%" }}
             >
                 <AddSVGPatterns />
+
+                {/* Lines GeoJSON - background visual layer, no interaction */}
+                {linesGeo && linesGeo.features && linesGeo.features.length > 0 && (
+                    <>
+                        <GeoJSON
+                            data={linesGeo}
+                            style={linesStyleFn}
+                            interactive={false}
+                            renderer={svgRenderer}
+                            onEachFeature={(feature, layer) => {
+                                // Mark as lines layer
+                                layer.feature = { ...layer.feature, properties: { ...layer.feature?.properties, _isLinesLayer: true } };
+                                
+                                // Force bring to back immediately
+                                if (layer.bringToBack) {
+                                    layer.bringToBack();
+                                }
+                                
+                                // Also use layer events to ensure it stays in back
+                                layer.on("add", () => {
+                                    if (layer.bringToBack) {
+                                        layer.bringToBack();
+                                    }
+                                });
+                                
+                                // Debug: Log when layer is added
+                                layer.on("add", () => {
+                                    console.log("Lines layer added:", feature.properties?.layer || "unknown");
+                                });
+                            }}
+                        />
+                        <BringLinesToBack />
+                    </>
+                )}
 
                 {liveGeo && (
                     <>
